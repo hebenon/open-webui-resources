@@ -1,7 +1,7 @@
 """
 Memory Enhancement Tool for Open WebUI Knowledge Bases
 
-- Exposes a Tools class (public surface) with configuration Valves and the following async methods:
+- Exposes a Tools class (public surface) with configuration Valves and UserValves and the following async methods:
   - recall_memories(__user__, __event_emitter__, kb_id=None)
   - add_memory(items=None, __user__=None, __event_emitter__=None, kb_id=None)
   - update_memory(updates=None, __user__=None, __event_emitter__=None, kb_id=None)
@@ -13,7 +13,8 @@ Memory Enhancement Tool for Open WebUI Knowledge Bases
 - Valves:
     - USE_MEMORY: enable/disable usage
     - DEBUG: enable debug logging
-    - DEFAULT_KB_ID: fallback KB id
+- UserValves:
+    - knowledge_base_id: per-user Knowledge Base ID
 """
 
 import inspect
@@ -95,6 +96,7 @@ class Tools:
     Memory tool public surface.
 
     Valves (configuration) are available at `tools.valves`.
+    UserValves (per-user configuration) are available at `tools.user_valves`.
 
     Methods (async):
       - recall_memories(__user__, __event_emitter__, kb_id=None) -> JSON str
@@ -117,13 +119,16 @@ class Tools:
         DEBUG: bool = Field(
             default=True, description="Enable or disable debug mode (controls logging)."
         )
-        DEFAULT_KB_ID: Optional[str] = Field(
+
+    class UserValves(BaseModel):
+        knowledge_base_id: Optional[str] = Field(
             default=None,
-            description="Default Knowledge Base ID. Used if no kb_id provided.",
+            description="Knowledge Base ID for this user's memory operations.",
         )
 
     def __init__(self):
         self.valves = self.Valves()
+        self.user_valves = self.UserValves()
 
     # -------------------------
     # Helper utilities (instance-level)
@@ -363,11 +368,12 @@ class Tools:
         self, __user__: Optional[dict], explicit_kb_id: Optional[str] = None
     ) -> Optional[str]:
         """
-        Resolve kb id in order: explicit_kb_id, __user__['kb_id'], Valves.DEFAULT_KB_ID
+        Resolve kb id in order: explicit_kb_id, __user__['kb_id'], user_valves.knowledge_base_id
         """
         if explicit_kb_id:
             return explicit_kb_id
         if __user__:
+            # Check standard user kb_id fields
             kb = (
                 __user__.get("kb_id")
                 or __user__.get("knowledge_id")
@@ -375,7 +381,11 @@ class Tools:
             )
             if kb:
                 return kb
-        return self.valves.DEFAULT_KB_ID
+            # Check user valves for knowledge_base_id
+            user_valves = __user__.get("valves")
+            if user_valves and hasattr(user_valves, 'knowledge_base_id'):
+                return user_valves.knowledge_base_id
+        return None
 
     @staticmethod
     def _find_block_index(blocks: List[dict], identifier: str) -> Optional[int]:
@@ -419,7 +429,7 @@ class Tools:
 
         resolved_kb = self._resolve_kb_id(__user__, kb_id)
         if not resolved_kb:
-            msg = "Knowledge base id not provided (no explicit kb_id, user.kb_id, or DEFAULT_KB_ID)."
+            msg = "Knowledge base id not provided (no explicit kb_id, user.kb_id, or user valves knowledge_base_id)."
             await emitter.emit(description=msg, status="missing_kb_id", done=True)
             return json.dumps({"message": msg}, ensure_ascii=False)
 
@@ -506,7 +516,7 @@ class Tools:
 
         resolved_kb = self._resolve_kb_id(__user__, kb_id)
         if not resolved_kb:
-            msg = "Knowledge base id not provided (no explicit kb_id, user.kb_id, or DEFAULT_KB_ID)."
+            msg = "Knowledge base id not provided (no explicit kb_id, user.kb_id, or user valves knowledge_base_id)."
             await emitter.emit(description=msg, status="missing_kb_id", done=True)
             return json.dumps({"message": msg}, ensure_ascii=False)
 
@@ -724,7 +734,7 @@ class Tools:
 
         resolved_kb = self._resolve_kb_id(__user__, kb_id)
         if not resolved_kb:
-            msg = "Knowledge base id not provided"
+            msg = "Knowledge base id not provided (no explicit kb_id, user.kb_id, or user valves knowledge_base_id)"
             await emitter.emit(description=msg, status="missing_kb_id", done=True)
             return json.dumps({"message": msg}, ensure_ascii=False)
 
@@ -877,7 +887,7 @@ class Tools:
 
         resolved_kb = self._resolve_kb_id(__user__, kb_id)
         if not resolved_kb:
-            msg = "Knowledge base id not provided"
+            msg = "Knowledge base id not provided (no explicit kb_id, user.kb_id, or user valves knowledge_base_id)"
             await emitter.emit(description=msg, status="missing_kb_id", done=True)
             return json.dumps({"message": msg}, ensure_ascii=False)
 
